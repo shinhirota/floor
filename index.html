@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>床振動アナライザー</title>
+<style>
+  :root{
+    --bg:#EEF1F4;
+    --panel:#FFFFFF;
+    --border:#C9D0D9;
+    --grid:#DDE3EA;
+    --ink:#1B2733;
+    --sub:#5B6B7A;
+    --traceA:#2451B3;  /* 床のみ */
+    --traceB:#D94F2B;  /* 人あり */
+    --rec:#C12E2E;
+    --ok:#1E7F4F;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    font-size:15px;line-height:1.6;
+    padding:14px 12px 60px;
+    max-width:760px;margin:0 auto;
+  }
+  header{margin-bottom:14px}
+  h1{font-size:21px;font-weight:700;letter-spacing:.02em}
+  .tagline{color:var(--sub);font-size:12.5px;margin-top:2px}
+  .card{
+    background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:14px;margin-bottom:12px;
+  }
+  .card h2{
+    font-size:12px;font-weight:700;color:var(--sub);
+    letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .card h2::after{content:"";flex:1;height:1px;background:var(--grid)}
+  button{
+    font:inherit;font-weight:600;border-radius:8px;border:1px solid var(--border);
+    background:#F6F8FA;color:var(--ink);padding:10px 14px;cursor:pointer;
+    touch-action:manipulation;
+  }
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.45;cursor:default}
+  button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+  button.recA{background:var(--traceA);color:#fff;border-color:var(--traceA)}
+  button.recB{background:var(--traceB);color:#fff;border-color:var(--traceB)}
+  button.stop{background:var(--rec);color:#fff;border-color:var(--rec)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row>button{flex:1;min-width:130px}
+  canvas{display:block;width:100%;border:1px solid var(--grid);border-radius:6px;background:#FDFEFF}
+  .lcd{
+    font-family:var(--mono);background:#10161D;color:#D7E3EE;border-radius:8px;
+    padding:10px 12px;display:flex;justify-content:space-between;align-items:baseline;
+    flex-wrap:wrap;gap:6px 14px;margin-top:10px;
+  }
+  .lcd .k{font-size:10.5px;color:#7C8EA0;letter-spacing:.1em}
+  .lcd .v{font-size:17px}
+  .lcd .v small{font-size:11px;color:#7C8EA0;margin-left:2px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:baseline}
+  .dotA{background:var(--traceA)} .dotB{background:var(--traceB)}
+  .slotinfo{font-family:var(--mono);font-size:12.5px;color:var(--sub);margin-top:8px;line-height:1.9}
+  .slotinfo b{color:var(--ink);font-weight:600}
+  .msg{font-size:13px;margin-top:8px;color:var(--sub)}
+  .msg.err{color:var(--rec)}
+  .msg.ok{color:var(--ok)}
+  .recbar{
+    display:none;align-items:center;gap:10px;margin-top:10px;
+    font-family:var(--mono);font-size:14px;
+  }
+  .recbar.on{display:flex}
+  .blink{width:11px;height:11px;border-radius:50%;background:var(--rec);animation:bl 1s steps(2) infinite}
+  @keyframes bl{50%{opacity:.15}}
+  @media (prefers-reduced-motion:reduce){.blink{animation:none}}
+  label.sl{font-size:12.5px;color:var(--sub);display:block;margin-top:8px}
+  input[type=range]{width:100%}
+  .zoom{display:flex;gap:6px;margin:8px 0}
+  .zoom button{flex:1;padding:6px 4px;font-size:12.5px;font-weight:600}
+  .zoom button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  details{margin-top:4px}
+  summary{font-size:13px;font-weight:600;color:var(--sub);cursor:pointer;padding:4px 0}
+  details ol,details ul{padding-left:1.3em;font-size:13.5px;color:var(--ink)}
+  details li{margin:6px 0}
+  .peaks{font-family:var(--mono);font-size:13px;margin-top:8px;line-height:2}
+  .csvrow{display:flex;gap:8px;margin-top:10px}
+  .csvrow button{flex:1;font-size:12.5px;padding:8px}
+  .seg{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:8px}
+  .seg button{flex:1;border:0;border-radius:0;background:#F6F8FA}
+  .seg button.on{background:var(--ink);color:#fff}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>床振動アナライザー</h1>
+  <div class="tagline">床置きスマホで共振周波数シフトを観測する検証ツール</div>
+</header>
+
+<!-- 手順 -->
+<div class="card">
+  <details>
+    <summary>測定手順とコツ（タップで開く）</summary>
+    <ol>
+      <li>スマホを床に<b>画面を上にして平置き</b>し、滑らないようにする（カーペットの上か、薄いタオル1枚程度）。測定中は位置を変えない。</li>
+      <li><b>A：床のみ</b> — 自分は床から離れた場所（別の部屋の入口など）に立ち、本などを床に落として床を励起しつつ30秒以上記録。</li>
+      <li><b>B：人あり</b> — スマホから50cm〜1mの定位置に立ち、リズミカルにスクワット。30秒以上記録。最後の5秒は<b>ピタッと静止</b>すると残響（自由減衰）が録れて綺麗。</li>
+      <li>スペクトルでAとBの主要ピークを比較。人が乗るとピークが<b>低い方へシフトし、なだらかに</b>なるのが期待される信号。</li>
+    </ol>
+    <ul>
+      <li>周波数分解能 ≒ 1 ÷ 記録秒数。0.1Hzの差を見るには30秒以上推奨。</li>
+      <li>スクワットの周期（0.5Hz前後）とその整数倍に櫛状のピークが立つのは正常。床の共振は10〜25Hz付近の幅広い山として現れることが多い。</li>
+      <li>木造床向き。コンクリート直床では信号がほぼ出ない可能性が高い。</li>
+    </ul>
+  </details>
+</div>
+
+<!-- センサー -->
+<div class="card">
+  <h2>センサー</h2>
+  <div class="row">
+    <button id="btnSensor" class="primary">センサーを有効化</button>
+  </div>
+  <div id="sensorMsg" class="msg">加速度センサーへのアクセス許可が必要です。スマートフォンで開いてください。</div>
+  <canvas id="liveChart" height="120"></canvas>
+  <div class="lcd">
+    <div><div class="k">SAMPLING</div><div class="v" id="lcdRate">--<small>Hz</small></div></div>
+    <div><div class="k">SOURCE</div><div class="v" id="lcdSrc" style="font-size:13px">--</div></div>
+    <div><div class="k">LIVE z</div><div class="v" id="lcdZ">--<small>m/s²</small></div></div>
+  </div>
+</div>
+
+<!-- 記録 -->
+<div class="card">
+  <h2>記録</h2>
+  <div class="row">
+    <button id="btnRecA" class="recA" disabled>● A：床のみ を記録</button>
+    <button id="btnRecB" class="recB" disabled>● B：人あり を記録</button>
+  </div>
+  <div class="recbar" id="recbar">
+    <span class="blink"></span>
+    <span id="recLabel">記録中</span>
+    <span id="recTime" style="margin-left:auto">0.0 s</span>
+    <button id="btnStop" class="stop" style="flex:0;padding:8px 16px">停止</button>
+  </div>
+  <div class="slotinfo" id="slotInfo">
+    <span class="dot dotA"></span><b>A 床のみ</b>：未記録<br>
+    <span class="dot dotB"></span><b>B 人あり</b>：未記録
+  </div>
+  <div class="csvrow">
+    <button id="csvA" disabled>A をCSV保存</button>
+    <button id="csvB" disabled>B をCSV保存</button>
+  </div>
+</div>
+
+<!-- 波形 -->
+<div class="card">
+  <h2>時系列波形</h2>
+  <div class="seg" id="waveSeg">
+    <button data-slot="A" class="on">A 床のみ</button>
+    <button data-slot="B">B 人あり</button>
+  </div>
+  <canvas id="waveChart" height="150"></canvas>
+  <label class="sl">解析範囲（先頭をカット）: <span id="trimSv">0</span> s</label>
+  <input type="range" id="trimS" min="0" max="100" value="0" step="1">
+  <label class="sl">解析範囲（末尾をカット）: <span id="trimEv">0</span> s</label>
+  <input type="range" id="trimE" min="0" max="100" value="0" step="1">
+  <div class="msg">薄い帯＝解析から除外される範囲。残響だけ解析したい場合は、スクワット停止より前を先頭カットで除外。</div>
+</div>
+
+<!-- スペクトル -->
+<div class="card">
+  <h2>振幅スペクトル（FFT）</h2>
+  <div class="zoom" id="zoomBar">
+    <button data-r="10">0–10 Hz</button>
+    <button data-r="30" class="on">0–30 Hz</button>
+    <button data-r="0">全帯域</button>
+  </div>
+  <canvas id="specChart" height="210"></canvas>
+  <div class="peaks" id="peakInfo">記録するとここにピーク周波数が表示されます。</div>
+  <div class="lcd">
+    <div><div class="k">PEAK A</div><div class="v" id="lcdPA">--<small>Hz</small></div></div>
+    <div><div class="k">PEAK B</div><div class="v" id="lcdPB">--<small>Hz</small></div></div>
+    <div><div class="k">Δf (A−B)</div><div class="v" id="lcdDF">--<small>Hz</small></div></div>
+  </div>
+  <div class="msg">各トレースはそれぞれの最大値で正規化（dB表示）。比較するのは高さではなくピークの「位置」と「幅」。3Hz未満はスクワット動作の高調波帯として、ピーク検出から除外しています。</div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- state ---------- */
+const slots = { A: null, B: null }; // {t:[], z:[], rate, src, dur}
+let sensorOn = false;
+let srcName = "--";
+let live = [];            // live ring buffer [{t,z}]
+const LIVE_SPAN = 5;      // seconds shown
+let rec = null;           // {slot, t0, t:[], z:[]}
+let rateEst = 0;
+let waveSlot = "A";
+let zoomMax = 30;         // 0 = full band
+const trims = { A:{s:0,e:0}, B:{s:0,e:0} };
+let lastT = null, dtAcc = [], lastUi = 0;
+
+const $ = id => document.getElementById(id);
+
+/* ---------- sensor ---------- */
+function onMotion(e){
+  let z, src;
+  if (e.acceleration && e.acceleration.z != null && isFinite(e.acceleration.z)){
+    z = e.acceleration.z; src = "linear (重力除去済)";
+  } else if (e.accelerationIncludingGravity && e.accelerationIncludingGravity.z != null){
+    z = e.accelerationIncludingGravity.z; src = "incl. gravity";
+  } else return;
+  srcName = src;
+  const t = performance.now()/1000;
+
+  if (lastT != null){
+    const dt = t - lastT;
+    if (dt > 0 && dt < 0.5){ dtAcc.push(dt); if (dtAcc.length > 200) dtAcc.shift(); }
+  }
+  lastT = t;
+
+  live.push({t, z});
+  while (live.length && t - live[0].t > LIVE_SPAN) live.shift();
+
+  if (rec){ rec.t.push(t - rec.t0); rec.z.push(z); }
+
+  if (t - lastUi > 0.25){
+    lastUi = t;
+    if (dtAcc.length > 10){
+      const s = dtAcc.slice().sort((a,b)=>a-b);
+      rateEst = 1/s[Math.floor(s.length/2)];
+      $("lcdRate").innerHTML = rateEst.toFixed(0) + "<small>Hz</small>";
+    }
+    $("lcdSrc").textContent = srcName;
+    $("lcdZ").innerHTML = z.toFixed(3) + "<small>m/s²</small>";
+    if (rec) $("recTime").textContent = (t - rec.t0).toFixed(1) + " s";
+  }
+}
+
+async function enableSensor(){
+  const msg = $("sensorMsg");
+  if (typeof DeviceMotionEvent === "undefined"){
+    msg.textContent = "この環境では加速度センサーAPIが利用できません。スマートフォンのブラウザで開いてください。";
+    msg.className = "msg err"; return;
+  }
+  try{
+    if (typeof DeviceMotionEvent.requestPermission === "function"){
+      const p = await DeviceMotionEvent.requestPermission();
+      if (p !== "granted"){ msg.textContent = "センサーへのアクセスが拒否されました。ブラウザの設定から許可してください。"; msg.className="msg err"; return; }
+    }
+    window.addEventListener("devicemotion", onMotion);
+    sensorOn = true;
+    msg.textContent = "センサー有効。波形が動かない場合はページがHTTPSで開かれているか確認してください。";
+    msg.className = "msg ok";
+    $("btnSensor").disabled = true;
+    $("btnRecA").disabled = false;
+    $("btnRecB").disabled = false;
+    requestAnimationFrame(liveLoop);
+  }catch(err){
+    msg.textContent = "センサーを開始できませんでした: " + err.message;
+    msg.className = "msg err";
+  }
+}
+$("btnSensor").addEventListener("click", enableSensor);
+
+/* ---------- recording ---------- */
+function startRec(slot){
+  if (!sensorOn || rec) return;
+  rec = { slot, t0: performance.now()/1000, t:[], z:[] };
+  $("recLabel").textContent = "記録中：" + (slot==="A" ? "A 床のみ" : "B 人あり");
+  $("recbar").classList.add("on");
+  $("btnRecA").disabled = true; $("btnRecB").disabled = true;
+}
+function stopRec(){
+  if (!rec) return;
+  const r = rec; rec = null;
+  $("recbar").classList.remove("on");
+  $("btnRecA").disabled = false; $("btnRecB").disabled = false;
+  if (r.t.length < 50){ updateSlotInfo(); return; }
+  const dur = r.t[r.t.length-1];
+  const rate = Math.max(10, Math.round((r.t.length-1)/dur));
+  slots[r.slot] = { t:r.t, z:r.z, rate, src:srcName, dur };
+  trims[r.slot] = { s:0, e:0 };
+  if (slots[r.slot]) waveSlot = r.slot;
+  syncWaveSeg();
+  updateSlotInfo();
+  setTrimSliders();
+  redrawAll();
+}
+$("btnRecA").addEventListener("click", ()=>startRec("A"));
+$("btnRecB").addEventListener("click", ()=>startRec("B"));
+$("btnStop").addEventListener("click", stopRec);
+
+function updateSlotInfo(){
+  const f = s => s ? `${s.dur.toFixed(1)} s / ${s.rate} Hz / 分解能 ≈ ${(1/Math.max(1,s.dur)).toFixed(2)} Hz` : "未記録";
+  $("slotInfo").innerHTML =
+    `<span class="dot dotA"></span><b>A 床のみ</b>：${f(slots.A)}<br>` +
+    `<span class="dot dotB"></span><b>B 人あり</b>：${f(slots.B)}`;
+  $("csvA").disabled = !slots.A;
+  $("csvB").disabled = !slots.B;
+}
+
+/* ---------- CSV ---------- */
+function saveCsv(slot){
+  const s = slots[slot]; if (!s) return;
+  let txt = "time_s,accel_z_ms2\n";
+  for (let i=0;i<s.t.length;i++) txt += s.t[i].toFixed(4)+","+s.z[i].toFixed(5)+"\n";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([txt],{type:"text/csv"}));
+  a.download = "floor_vibration_"+slot+".csv";
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+$("csvA").addEventListener("click", ()=>saveCsv("A"));
+$("csvB").addEventListener("click", ()=>saveCsv("B"));
+
+/* ---------- DSP ---------- */
+function resample(t, z, rate){
+  const n = Math.floor(t[t.length-1]*rate);
+  const out = new Float64Array(n);
+  let j = 0;
+  for (let i=0;i<n;i++){
+    const ti = i/rate;
+    while (j < t.length-2 && t[j+1] < ti) j++;
+    const dt = t[j+1]-t[j];
+    out[i] = dt > 0 ? z[j] + (z[j+1]-z[j])*(ti-t[j])/dt : z[j];
+  }
+  return out;
+}
+function detrend(x){
+  const n = x.length;
+  let sy=0, sxy=0;
+  const mx = (n-1)/2;
+  for (let i=0;i<n;i++) sy += x[i];
+  const my = sy/n;
+  let sxx=0;
+  for (let i=0;i<n;i++){ sxy += (i-mx)*(x[i]-my); sxx += (i-mx)*(i-mx); }
+  const b = sxx>0 ? sxy/sxx : 0;
+  const out = new Float64Array(n);
+  for (let i=0;i<n;i++) out[i] = x[i] - my - b*(i-mx);
+  return out;
+}
+function fft(re, im){
+  const n = re.length;
+  for (let i=1,j=0;i<n;i++){
+    let bit = n>>1;
+    for(;j&bit;bit>>=1) j^=bit;
+    j^=bit;
+    if (i<j){ let t=re[i];re[i]=re[j];re[j]=t; t=im[i];im[i]=im[j];im[j]=t; }
+  }
+  for (let len=2; len<=n; len<<=1){
+    const ang = -2*Math.PI/len, wr0=Math.cos(ang), wi0=Math.sin(ang);
+    for (let i=0;i<n;i+=len){
+      let wr=1, wi=0;
+      for (let k=0;k<len/2;k++){
+        const ur=re[i+k], ui=im[i+k];
+        const vr=re[i+k+len/2]*wr - im[i+k+len/2]*wi;
+        const vi=re[i+k+len/2]*wi + im[i+k+len/2]*wr;
+        re[i+k]=ur+vr; im[i+k]=ui+vi;
+        re[i+k+len/2]=ur-vr; im[i+k+len/2]=ui-vi;
+        const nwr=wr*wr0-wi*wi0; wi=wr*wi0+wi*wr0; wr=nwr;
+      }
+    }
+  }
+}
+function spectrum(slot){
+  const s = slots[slot]; if (!s) return null;
+  const tr = trims[slot];
+  const i0 = s.t.findIndex(v=>v>=tr.s);
+  const tEnd = s.dur - tr.e;
+  let i1 = s.t.length-1;
+  while (i1>0 && s.t[i1] > tEnd) i1--;
+  if (i1 - i0 < 64) return null;
+  const t = s.t.slice(i0, i1+1).map(v=>v-s.t[i0]);
+  const z = s.z.slice(i0, i1+1);
+  const x = detrend(resample(t, z, s.rate));
+  const n = x.length;
+  // Hann window
+  for (let i=0;i<n;i++) x[i] *= 0.5*(1-Math.cos(2*Math.PI*i/(n-1)));
+  let m = 1; while (m < n) m <<= 1;
+  if (m < 2*n) m <<= 1; // zero-pad ×2 で見かけの補間
+  const re = new Float64Array(m), im = new Float64Array(m);
+  re.set(x);
+  fft(re, im);
+  const half = m>>1;
+  const amp = new Float64Array(half);
+  for (let i=0;i<half;i++) amp[i] = Math.hypot(re[i], im[i]);
+  return { amp, df: s.rate/m, nyq: s.rate/2 };
+}
+function findPeaks(sp){
+  if (!sp) return [];
+  const fMin = 3, fMax = sp.nyq*0.98;
+  const i0 = Math.ceil(fMin/sp.df), i1 = Math.min(sp.amp.length-2, Math.floor(fMax/sp.df));
+  const w = Math.max(2, Math.round(0.4/sp.df)); // ±0.4Hz 近傍で極大
+  let peaks = [];
+  for (let i=i0;i<=i1;i++){
+    const a = sp.amp[i];
+    let isMax = true;
+    for (let k=Math.max(i0,i-w); k<=Math.min(i1,i+w); k++){
+      if (sp.amp[k] > a){ isMax = false; break; }
+    }
+    if (isMax && a>0){ peaks.push({f:i*sp.df, a}); i += w; }
+  }
+  peaks.sort((p,q)=>q.a-p.a);
+  return peaks.slice(0,3);
+}
+
+/* ---------- canvas helpers ---------- */
+function setupCanvas(c){
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = parseInt(c.getAttribute("height"));
+  c.width = w*dpr; c.height = h*dpr; c.style.height = h+"px";
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx, w, h};
+}
+function gridY(ctx,w,h,n){
+  ctx.strokeStyle = "#DDE3EA"; ctx.lineWidth = 1;
+  for (let i=1;i<n;i++){ const y=h*i/n; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+}
+
+/* ---------- live chart ---------- */
+function liveLoop(){
+  const {ctx,w,h} = setupCanvas($("liveChart"));
+  ctx.clearRect(0,0,w,h);
+  gridY(ctx,w,h,4);
+  if (live.length > 2){
+    const tNow = live[live.length-1].t;
+    let amax = 0.05;
+    for (const p of live) amax = Math.max(amax, Math.abs(p.z));
+    ctx.strokeStyle = rec ? "#C12E2E" : "#1B2733";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let i=0;i<live.length;i++){
+      const x = w*(1-(tNow-live[i].t)/LIVE_SPAN);
+      const y = h/2 - (live[i].z/amax)*(h/2-6);
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = "#5B6B7A"; ctx.font = "10px ui-monospace,monospace";
+    ctx.fillText("±"+amax.toFixed(2)+" m/s²  /  "+LIVE_SPAN+" s", 6, 12);
+  }
+  requestAnimationFrame(liveLoop);
+}
+
+/* ---------- waveform chart ---------- */
+function drawWave(){
+  const {ctx,w,h} = setupCanvas($("waveChart"));
+  ctx.clearRect(0,0,w,h);
+  gridY(ctx,w,h,4);
+  const s = slots[waveSlot];
+  if (!s){
+    ctx.fillStyle="#5B6B7A"; ctx.font="13px sans-serif";
+    ctx.fillText("スロット "+waveSlot+" は未記録です", 10, h/2);
+    return;
+  }
+  let amax = 0.02;
+  for (const v of s.z) amax = Math.max(amax, Math.abs(v));
+  const col = waveSlot==="A" ? "#2451B3" : "#D94F2B";
+  ctx.strokeStyle = col; ctx.lineWidth = 1;
+  ctx.beginPath();
+  const step = Math.max(1, Math.floor(s.t.length/(w*2)));
+  for (let i=0;i<s.t.length;i+=step){
+    const x = w*s.t[i]/s.dur;
+    const y = h/2 - (s.z[i]/amax)*(h/2-4);
+    i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+  }
+  ctx.stroke();
+  // trim shading
+  const tr = trims[waveSlot];
+  ctx.fillStyle = "rgba(27,39,51,.10)";
+  if (tr.s>0) ctx.fillRect(0,0,w*tr.s/s.dur,h);
+  if (tr.e>0) ctx.fillRect(w*(1-tr.e/s.dur),0,w*tr.e/s.dur,h);
+  ctx.fillStyle="#5B6B7A"; ctx.font="10px ui-monospace,monospace";
+  ctx.fillText("±"+amax.toFixed(2)+" m/s²  /  "+s.dur.toFixed(1)+" s", 6, 12);
+}
+
+/* ---------- spectrum chart ---------- */
+function drawSpec(){
+  const {ctx,w,h} = setupCanvas($("specChart"));
+  ctx.clearRect(0,0,w,h);
+  const padL = 30, padB = 20;
+  const pw = w-padL-6, ph = h-padB-8;
+  const spA = spectrum("A"), spB = spectrum("B");
+  const nyq = Math.max(spA?spA.nyq:0, spB?spB.nyq:0, 30);
+  const fMax = zoomMax>0 ? Math.min(zoomMax, nyq) : nyq;
+  const dbMin = -60;
+
+  // grid + axes
+  ctx.strokeStyle="#DDE3EA"; ctx.fillStyle="#5B6B7A";
+  ctx.font="10px ui-monospace,monospace"; ctx.lineWidth=1;
+  for (let db=0; db>=dbMin; db-=20){
+    const y = 8 + ph*(-db/ -dbMin);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-6,y); ctx.stroke();
+    ctx.fillText(db+"dB", 2, y+3);
+  }
+  const fStep = fMax<=12 ? 1 : fMax<=35 ? 5 : 10;
+  for (let f=0; f<=fMax; f+=fStep){
+    const x = padL + pw*f/fMax;
+    ctx.beginPath(); ctx.moveTo(x,8); ctx.lineTo(x,8+ph); ctx.stroke();
+    ctx.fillText(f+"", x-3, h-6);
+  }
+  ctx.fillText("Hz", w-18, h-6);
+
+  function trace(sp, col){
+    if (!sp) return;
+    let max = 0;
+    const iMax = Math.min(sp.amp.length-1, Math.floor(fMax/sp.df));
+    for (let i=1;i<=iMax;i++) max = Math.max(max, sp.amp[i]);
+    if (max<=0) return;
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let started=false;
+    for (let i=1;i<=iMax;i++){
+      const db = Math.max(dbMin, 20*Math.log10(sp.amp[i]/max));
+      const x = padL + pw*(i*sp.df)/fMax;
+      const y = 8 + ph*(-db/ -dbMin);
+      started ? ctx.lineTo(x,y) : (ctx.moveTo(x,y), started=true);
+    }
+    ctx.stroke();
+  }
+  trace(spA, "#2451B3");
+  trace(spB, "#D94F2B");
+
+  // peaks
+  const pA = findPeaks(spA), pB = findPeaks(spB);
+  function mark(peaks, sp, col){
+    if (!sp) return;
+    let max=0;
+    const iMax = Math.min(sp.amp.length-1, Math.floor(fMax/sp.df));
+    for (let i=1;i<=iMax;i++) max=Math.max(max,sp.amp[i]);
+    ctx.fillStyle = col;
+    for (const p of peaks){
+      if (p.f>fMax) continue;
+      const db = Math.max(dbMin, 20*Math.log10(p.a/max));
+      const x = padL + pw*p.f/fMax, y = 8 + ph*(-db/ -dbMin);
+      ctx.beginPath(); ctx.arc(x,y,3.5,0,7); ctx.fill();
+    }
+  }
+  mark(pA, spA, "#2451B3");
+  mark(pB, spB, "#D94F2B");
+
+  // readouts
+  const fmt = p => p.map(q=>q.f.toFixed(2)+" Hz").join(" / ");
+  let html = "";
+  html += `<span class="dot dotA"></span>A ピーク: ${pA.length?fmt(pA):"--"}<br>`;
+  html += `<span class="dot dotB"></span>B ピーク: ${pB.length?fmt(pB):"--"}`;
+  $("peakInfo").innerHTML = html;
+  $("lcdPA").innerHTML = (pA.length?pA[0].f.toFixed(2):"--")+"<small>Hz</small>";
+  $("lcdPB").innerHTML = (pB.length?pB[0].f.toFixed(2):"--")+"<small>Hz</small>";
+  if (pA.length && pB.length){
+    // Bの主ピークではなく、Aの主ピークに最も近いBのピークと比較(モード対応付け)
+    let best = pB[0], dmin = Infinity;
+    for (const p of pB){ const d=Math.abs(p.f-pA[0].f); if (d<dmin){dmin=d;best=p;} }
+    const df = pA[0].f - best.f;
+    $("lcdDF").innerHTML = (df>=0?"+":"")+df.toFixed(2)+"<small>Hz</small>";
+    $("lcdDF").style.color = df>0.01 ? "#7BE0A8" : "#D7E3EE";
+  } else {
+    $("lcdDF").innerHTML = "--<small>Hz</small>";
+  }
+}
+
+/* ---------- controls ---------- */
+function syncWaveSeg(){
+  document.querySelectorAll("#waveSeg button").forEach(b=>{
+    b.classList.toggle("on", b.dataset.slot===waveSlot);
+  });
+}
+document.querySelectorAll("#waveSeg button").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    waveSlot = b.dataset.slot;
+    syncWaveSeg(); setTrimSliders(); drawWave();
+  });
+});
+function setTrimSliders(){
+  const s = slots[waveSlot];
+  const dur = s ? Math.floor(s.dur) : 100;
+  $("trimS").max = dur; $("trimE").max = dur;
+  $("trimS").value = trims[waveSlot].s;
+  $("trimE").value = trims[waveSlot].e;
+  $("trimSv").textContent = trims[waveSlot].s;
+  $("trimEv").textContent = trims[waveSlot].e;
+}
+function onTrim(){
+  let s = +$("trimS").value, e = +$("trimE").value;
+  const sl = slots[waveSlot];
+  if (sl && s+e > sl.dur-2){ // 最低2秒残す
+    e = Math.max(0, Math.floor(sl.dur-2-s));
+    $("trimE").value = e;
+  }
+  trims[waveSlot] = {s, e};
+  $("trimSv").textContent = s; $("trimEv").textContent = e;
+  drawWave(); drawSpec();
+}
+$("trimS").addEventListener("input", onTrim);
+$("trimE").addEventListener("input", onTrim);
+
+document.querySelectorAll("#zoomBar button").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    zoomMax = +b.dataset.r;
+    document.querySelectorAll("#zoomBar button").forEach(x=>x.classList.toggle("on",x===b));
+    drawSpec();
+  });
+});
+
+function redrawAll(){ drawWave(); drawSpec(); }
+window.addEventListener("resize", redrawAll);
+redrawAll();
+})();
+</script>
+</body>
+</html>
