@@ -415,7 +415,11 @@ function findPeaks(sp){
 function setupCanvas(c){
   const dpr = window.devicePixelRatio || 1;
   const w = c.clientWidth, h = parseInt(c.getAttribute("height"));
-  c.width = w*dpr; c.height = h*dpr; c.style.height = h+"px";
+  // サイズが変わったときだけ再設定する(毎フレーム再設定するとiOSで画面がちらつく)
+  if (c._w !== w || c._dpr !== dpr){
+    c.width = w*dpr; c.height = h*dpr; c.style.height = h+"px";
+    c._w = w; c._dpr = dpr;
+  }
   const ctx = c.getContext("2d");
   ctx.setTransform(dpr,0,0,dpr,0,0);
   return {ctx, w, h};
